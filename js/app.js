@@ -1,158 +1,142 @@
-(() => {
-const C = window.CONFIG, $ = s => document.querySelector(s), OFF = 19800000; // IST = UTC+5:30, no DST
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const normalizeName = s => String(s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
-const num = v => { const n = parseFloat(String(v ?? '').replace(/,/g, '')); return isFinite(n) ? n : 0; };
-const bool = v => v === true || String(v).trim().toUpperCase() === 'TRUE';
-const fmt = n => Math.round(n).toLocaleString('en-IN');
-const enc = s => encodeURIComponent(s);
-const S = { d: null, offset: 0, updated: null, stale: false, err: null, fetchedAt: null };
+/* ============ CONFIG ============ */
+const API_URL = "https://script.google.com/macros/s/AKfycby6rvrLqLvCQc9PNPyjFss0y9Nuam0K4TaCYTT_KKr3IGWqKI0Ppfwhp5W2Y6F0hNEG/exec"; // see README
+const CACHE_MS = 60000;                                     // reuse data for 60s
+/* ================================ */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const num = v => Number(v) || 0;
+const key = s => String(s ?? "").trim().toLowerCase();
+const RM = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const DEMO = !API_URL.startsWith("http");
+const PREVIEW = new URLSearchParams(location.search).has("preview"); // ?preview=1 skips the schedule
 
-/* ---------- images ---------- */
-function resolveImageUrl(v) {
-  v = String(v || '').trim(); if (!v) return '';
-  const m = v.match(/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:export=\w+&)?id=|thumbnail\?id=)([\w-]+)/);
-  if (m) return `https://drive.google.com/thumbnail?id=${m[1]}&sz=w200`;
-  if (/^https?:\/\//i.test(v)) return v;
-  return 'assets/logos/' + v.replace(/^\/+/, '');
-}
-const initials = t => String(t || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
-const logo = (t, u) => { const s = resolveImageUrl(u); return `<span class="lg"><i>${esc(initials(t))}</i>${s ? `<img src="${esc(s)}" alt="${esc(t)} logo" loading="lazy" onerror="this.remove()">` : ''}</span>`; };
-
-/* ---------- status engine (Asia/Kolkata) ---------- */
-const now = () => Date.now() + S.offset;
-function getAppStatus(t = now()) {
-  const d = new Date(t + OFF), y = d.getUTCFullYear(), m = d.getUTCMonth();
-  let cur = null, next = Infinity;
-  for (let k = -1; k <= 2; k++) for (const day of C.OPEN_DAYS) {
-    const u = Date.UTC(y, m + k, day);
-    if (new Date(u).getUTCDate() !== day) continue;          // skips nonexistent dates (e.g. 30 Feb)
-    const s = u - OFF, e = s + C.OPEN_HOURS * 36e5;
-    if (t >= s && t < e) cur = { s, e }; else if (s > t && s < next) next = s;
+/* ---------- Opening schedule (Asia/Kolkata, UTC+5:30, no DST) ---------- */
+const IST = 5.5 * 36e5, DAY = 864e5;
+function windows(now) {
+  const d = new Date(now + IST), out = [];
+  for (let k = -1; k <= 1; k++) {
+    const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + k, 1));
+    const y = t.getUTCFullYear(), m = t.getUTCMonth();
+    const dim = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    [10, 20, 30].forEach(day => { const s = Date.UTC(y, m, Math.min(day, dim)) - IST; out.push([s, s + 2 * DAY]); }); // 30th -> last day in short months
   }
-  return cur ? { isOpen: true, status: 'OPEN', currentOpenTime: cur.s, currentCloseTime: cur.e, nextOpenTime: next, millisecondsRemaining: cur.e - t }
-             : { isOpen: false, status: 'CLOSED', currentOpenTime: null, currentCloseTime: null, nextOpenTime: next, millisecondsRemaining: next - t };
+  return out.sort((a, b) => a[0] - b[0]);
 }
-const fmtIST = ms => new Date(ms).toLocaleString('en-GB', { timeZone: C.TIMEZONE, day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true }).replace(',', ' •').toUpperCase();
-const parts = ms => { const s = Math.max(0, Math.floor(ms / 1000)); return [Math.floor(s / 86400), Math.floor(s % 86400 / 3600), Math.floor(s % 3600 / 60), s % 60].map(n => String(n).padStart(2, '0')); };
-const timerHTML = ms => { const v = parts(ms); return `<div class="timer" role="timer" aria-label="Countdown">${['D','H','M','S'].map((l, i) => `<div><b data-t="${i}">${v[i]}</b><small>${l}</small></div>`).join('')}</div>`; };
-function statusHTML() {
-  const a = getAppStatus();
-  return a.isOpen
-    ? `<div class="st live">⚔ TPL ARENA IS LIVE</div>${timerHTML(a.millisecondsRemaining)}<div class="st">BATTLE CLOSES IN</div><p class="dates">OPENED: ${fmtIST(a.currentOpenTime)} &nbsp; CLOSES: ${fmtIST(a.currentCloseTime)}</p>`
-    : `<div class="closed"><svg class="glow"><use href="#emb"/></svg></div><div class="st">THE ARENA IS CLOSED<br>THE LIONS ARE RESTING</div>${timerHTML(a.millisecondsRemaining)}<div class="st">NEXT BATTLE OPENS IN</div><p class="dates">NEXT OPENING: ${fmtIST(a.nextOpenTime)}</p>`;
+function status(now = Date.now()) {
+  const w = windows(now), cur = w.find(x => now >= x[0] && now < x[1]);
+  return cur ? { open: true, end: cur[1] } : { open: false, next: w.find(x => x[0] > now)[0] };
 }
-let lastState = null;
-function tick() {
-  const a = getAppStatus();
-  if (lastState !== null && a.status !== lastState) { const h = $('#status'); if (h) h.innerHTML = statusHTML(); load(true); }
-  lastState = a.status;
-  const v = parts(a.millisecondsRemaining);
-  document.querySelectorAll('[data-t]').forEach(e => e.textContent = v[e.dataset.t]);
+const p2 = n => String(n).padStart(2, "0");
+function parts(ms) { ms = Math.max(0, ms); return { d: Math.floor(ms / DAY), h: Math.floor(ms % DAY / 36e5), m: Math.floor(ms % 36e5 / 6e4), s: Math.floor(ms % 6e4 / 1e3) }; }
+const fmtDate = ms => new Date(ms).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+
+/* ---------- Data (cached, de-duplicated) ---------- */
+const store = {}, inflight = {};
+async function load(kind, force) {
+  const c = store[kind];
+  if (!force && c && Date.now() - c.t < CACHE_MS) return c.d;
+  if (inflight[kind]) return inflight[kind];
+  inflight[kind] = (DEMO ? Promise.resolve(demo(kind)) : fetch(`${API_URL}?action=${kind}`).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(j => { if (j.error) throw new Error(j.error); return j.data; }))
+    .then(d => (store[kind] = { t: Date.now(), d }, d)).finally(() => delete inflight[kind]);
+  return inflight[kind];
+}
+function demo(kind) { // sample data so the UI works before the API is connected
+  const T = ["Alpha Lions", "Blue Titans", "Crown Hawks", "Delta Storm"], names = "Aarav Bhavna Chirag Diya Esha Farhan Gauri Hemant Isha Jay Kabir Lata".split(" ");
+  if (kind === "team") return T.map((t, i) => ({ Team: t, "Total Score": 980 - i * 130, Rank: i + 1, "Prev Rank": [2, 1, 3, 4][i], "Team Logo": "", lastSeasonWinner: i === 1 }));
+  return names.map((n, i) => ({ Name: n, Team: T[i % 4], Score: 320 - i * 21, Rank: i + 1, "Total SV": 9 - (i >> 1), "Total VC": 6, "Total F2F": 4, "Total Token": 3, "Total Booking": 2, "Team Logo": "" }));
 }
 
-/* ---------- data ---------- */
-function build(j) {
-  const rk = a => a.sort((x, y) => x.rank - y.rank);
-  const teams = rk((j.teams || []).filter(t => t && t.team).map(t => ({ ...t, totalScore: num(t.totalScore), rank: num(t.rank) || 9999, prevRank: num(t.prevRank), rankChange: num(t.rankChange), lastSeasonWinner: bool(t.lastSeasonWinner) })));
-  const teamsByName = {}; teams.forEach(t => teamsByName[normalizeName(t.team)] = t);
-  const inds = rk((j.individuals || []).filter(p => p && p.name).map(p => ({ ...p, score: num(p.score), rank: num(p.rank) || 9999, rankChange: num(p.rankChange), totalSV: num(p.totalSV), totalVC: num(p.totalVC), totalF2F: num(p.totalF2F), totalToken: num(p.totalToken), totalBooking: num(p.totalBooking), ultimateWinner: bool(p.ultimateWinner), secondPlace: bool(p.secondPlace), thirdPlace: bool(p.thirdPlace), teamLogo: p.teamLogo || (teamsByName[normalizeName(p.team)] || {}).teamLogo })));
-  const individualsByName = {}; inds.forEach(p => individualsByName[normalizeName(p.name)] = p);
-  const scoresByExecutive = {};
-  (j.scores || []).forEach(r => { if (!r || !r.executiveName) return; (scoresByExecutive[normalizeName(r.executiveName)] ||= []).push({ ...r, ts: Date.parse(r.date) || 0, siteVisits: num(r.siteVisits), vcs: num(r.vcs), f2fs: num(r.f2fs), token: num(r.token), booking: num(r.booking), dsr: num(r.dsr), additionalPoints: num(r.additionalPoints), negativePoints: num(r.negativePoints), dailyTotal: num(r.dailyTotal) }); });
-  Object.values(scoresByExecutive).forEach(a => a.sort((x, y) => y.ts - x.ts));
-  return { teams, inds, teamsByName, individualsByName, scoresByExecutive };
+/* ---------- Helpers ---------- */
+const initials = n => esc(String(n || "?").trim().split(/\s+/).slice(0, 2).map(w => w[0]).join("").toUpperCase());
+function pic(url, name, cls) {
+  const ini = initials(name);
+  return /^https?:/.test(url || "") ? `<img class="${cls}" src="${esc(url)}" alt="" loading="lazy" onerror="this.outerHTML='<span class=&quot;${cls}&quot;><span class=ini>${ini}</span></span>'">` : `<span class="${cls}"><span class="ini">${ini}</span></span>`;
 }
-async function load(silent) {
-  if (!silent) $('#view').innerHTML = '<div class="msg"><svg width="70" height="78" style="animation:br 2s infinite"><use href="#emb"/></svg><h2>ENTERING THE ARENA...</h2></div><div class="sk"></div><div class="sk"></div><div class="sk"></div>';
+function move(t) {
+  const r = num(t.Rank), p = num(t["Prev Rank"]);
+  let ch = p && r ? p - r : num(t["Rank Change"]);
+  return ch > 0 ? `<span class="mv up">▲ ${ch}</span>` : ch < 0 ? `<span class="mv dn">▼ ${-ch}</span>` : `<span class="mv eq">– same</span>`;
+}
+function countUp(root) {
+  root.querySelectorAll("[data-n]").forEach(el => {
+    const to = num(el.dataset.n); if (RM) return el.textContent = to;
+    const t0 = performance.now();
+    (function f(t) { const k = Math.min(1, (t - t0) / 800); el.textContent = Math.round(to * (1 - Math.pow(1 - k, 3))); if (k < 1) requestAnimationFrame(f); })(t0);
+  });
+}
+const loadingHTML = `<div class="state"><div class="ball"></div><b>Entering the League...</b></div>`;
+const errHTML = k => `<div class="state"><b>Couldn't load the scores.</b><p>Check your connection and try again.</p><button class="btn" onclick="show('${k}',true)">Retry</button></div>`;
+const emptyHTML = `<div class="state"><b>No scores yet.</b><p>The leaderboard fills up once the first points are in.</p></div>`;
+const sorted = a => [...a].sort((x, y) => (num(x.Rank) || 999) - (num(y.Rank) || 999));
+
+/* ---------- Views ---------- */
+function renderIndividual(list) {
+  if (!list.length) return emptyHTML;
+  const L = sorted(list), top = L.slice(0, 3), medal = ["🥇", "🥈", "🥉"];
+  const pod = [1, 0, 2].filter(i => top[i]).map(i => { const p = top[i]; return `<div class="pod p${i + 1}"><div class="m">${medal[i]}</div>${pic(p["Team Logo"], p.Name, "av")}<div class="nm">${esc(p.Name)}</div><div class="tm">${esc(p.Team)}</div><div class="sc" data-n="${num(p.Score)}">0</div></div>`; }).join("");
+  const rows = L.slice(3).map((p, i) => `<div class="row" style="--i:${i}"><div class="rk">${esc(p.Rank)}</div><div class="info"><b>${esc(p.Name)}</b><small>${esc(p.Team)} · SV ${num(p["Total SV"])} · VC ${num(p["Total VC"])} · F2F ${num(p["Total F2F"])} · Tok ${num(p["Total Token"])} · Bk ${num(p["Total Booking"])}</small></div><div class="pts" data-n="${num(p.Score)}">0</div></div>`).join("");
+  return `<h3 class="t">Individual Leaderboard</h3><div class="podium">${pod}</div>${rows}`;
+}
+function renderTeam(list) {
+  if (!list.length) return emptyHTML;
+  const L = sorted(list), lead = L[0];
+  const hero = `<button class="hero" data-t="${esc(lead.Team)}">${pic(lead["Team Logo"], lead.Team, "lg")}<div class="info"><div class="lead">🏆 LEADING THE LEAGUE</div><h4>${esc(lead.Team)}</h4></div><div class="pts"><span data-n="${num(lead["Total Score"])}">0</span><small>points</small></div></button>`;
+  const rows = L.slice(1).map((t, i) => `<button class="row" style="--i:${i}" data-t="${esc(t.Team)}"><div class="rk">${esc(t.Rank)}</div>${pic(t["Team Logo"], t.Team, "lg")}<div class="info"><b>${esc(t.Team)}${t.lastSeasonWinner === true || key(t.lastSeasonWinner) === "true" || key(t.lastSeasonWinner) === "yes" ? '<span class="crown">S4 CHAMPS</span>' : ""}</b>${move(t)}</div><div class="pts"><span data-n="${num(t["Total Score"])}">0</span><small>points</small></div></button>`).join("");
+  return `<h3 class="t">Team Leaderboard</h3>${hero}${rows}`;
+}
+async function openTeam(name) {
+  const box = $("#detail");
+  box.innerHTML = loadingHTML; box.classList.add("show"); box.setAttribute("aria-hidden", "false");
   try {
-    if (C.USE_MOCK_DATA) throw new Error('Mock data not bundled');
-    if (!C.API_URL || C.API_URL.startsWith('YOUR_')) throw new Error('API_URL not configured in js/config.js');
-    const t0 = Date.now(), r = await fetch(C.API_URL + (C.API_URL.includes('?') ? '&' : '?') + 'action=all', { cache: 'no-store' });
-    const j = await r.json(); if (!j.success) throw new Error(j.error || 'API returned success:false');
-    if (j.serverTime) S.offset = Date.parse(j.serverTime) - (t0 + Date.now()) / 2;  // corrects a wrong device clock
-    S.d = build(j); S.updated = j.updatedAt || new Date().toISOString(); S.stale = false; S.err = null; S.fetchedAt = new Date();
-    try { localStorage.setItem(C.CACHE_KEY, JSON.stringify({ j, at: S.updated })); } catch (e) {}
-  } catch (e) {
-    S.err = e.message;
-    try { const c = JSON.parse(localStorage.getItem(C.CACHE_KEY)); if (c) { S.d = build(c.j); S.updated = c.at; S.stale = true; } } catch (x) {}
+    const [teams, inds] = await Promise.all([load("team"), load("individual")]); // both reused from cache if already loaded
+    const t = teams.find(x => key(x.Team) === key(name)), M = sorted(inds.filter(i => key(i.Team) === key(name)));
+    const sum = f => M.reduce((a, m) => a + num(m[f]), 0), top = M[0];
+    box.innerHTML = `<div class="dh"><button class="back" id="back">← Back</button>${pic(t?.["Team Logo"], name, "lg")}<h3>${esc(name)}</h3><div>Rank #${esc(t?.Rank ?? "-")} ${t ? move(t).replace("mv ", "mv on ") : ""}</div></div>
+    <div class="stats"><div class="stat"><b data-n="${num(t?.["Total Score"])}">0</b><small>Team score</small></div><div class="stat"><b>${M.length}</b><small>Players</small></div><div class="stat"><b data-n="${M.length ? Math.round(sum("Score") / M.length) : 0}">0</b><small>Avg score</small></div><div class="stat"><b>${sum("Total SV")}</b><small>Site visits</small></div><div class="stat"><b>${sum("Total Token")}</b><small>Tokens</small></div><div class="stat"><b>${sum("Total Booking")}</b><small>Bookings</small></div></div>
+    <div class="mem">${M.length ? `<h3 class="t" style="margin-top:8px">Squad${top ? " · Top: " + esc(top.Name) : ""}</h3>` + M.map((m, i) => `<div class="row" style="--i:${i}"><div class="rk">${esc(m.Rank)}</div><div class="info"><b>${esc(m.Name)}</b><small>Individual rank #${esc(m.Rank)}</small></div><div class="pts"><span data-n="${num(m.Score)}">0</span><small>points</small></div></div>`).join("") : emptyHTML}</div>`;
+    $("#back").onclick = closeTeam; countUp(box); box.scrollTop = 0;
+  } catch (e) { box.innerHTML = `<div class="dh"><button class="back" id="back">← Back</button></div>` + errHTML("team").replace(/onclick="[^"]*"/, `onclick="openTeam('${esc(name).replace(/'/g, "\\'")}')"`); $("#back").onclick = closeTeam; }
+}
+function closeTeam() { const b = $("#detail"); b.classList.remove("show"); b.setAttribute("aria-hidden", "true"); }
+
+/* ---------- Navigation ---------- */
+let current = "individual";
+const rendered = {};
+async function show(v, force) {
+  const el = $("#" + v);
+  if (v !== current) {
+    $("#" + current).hidden = true; el.hidden = false; current = v;
+    el.classList.remove("enter"); void el.offsetWidth; el.classList.add("enter");
+    document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
+    $("#nav").classList.toggle("t", v === "team");
   }
-  render();
+  if (rendered[v] && !force && store[v] && Date.now() - store[v].t < CACHE_MS) return;
+  if (!rendered[v] || force) el.innerHTML = loadingHTML;
+  try {
+    const data = await load(v, force);
+    el.innerHTML = v === "individual" ? renderIndividual(data) : renderTeam(data);
+    rendered[v] = true; countUp(el);
+    el.querySelectorAll("[data-t]").forEach(b => b.onclick = () => openTeam(b.dataset.t));
+  } catch (e) { el.innerHTML = errHTML(v); }
 }
+document.querySelectorAll("#nav button").forEach(b => b.onclick = () => show(b.dataset.v));
+$("#refresh").onclick = async () => { const r = $("#refresh"); r.classList.add("spin"); await show(current, true); setTimeout(() => r.classList.remove("spin"), 400); };
+document.addEventListener("keydown", e => e.key === "Escape" && closeTeam());
 
-/* ---------- components ---------- */
-const mv = n => n > 0 ? `<span class="mv up">▲ +${n}</span>` : n < 0 ? `<span class="mv dn">▼ ${n}</span>` : `<span class="mv eq">— 0</span>`;
-const rkN = r => r < 9999 ? String(r).padStart(2, '0') : '—';
-const badge = p => p.ultimateWinner ? '<span class="bd g">SEASON CHAMPION</span>' : p.secondPlace ? '<span class="bd s">RUNNER UP</span>' : p.thirdPlace ? '<span class="bd b">THIRD PLACE</span>' : '';
-const pc = p => `<a class="card" href="#/player/${enc(p.name)}"><b class="rk">#${rkN(p.rank)}</b>${logo(p.team, p.teamLogo)}<div class="nm"><strong>${esc(p.name)}</strong><small>${esc(p.team)}</small> ${badge(p)}</div><div class="sc"><b>${fmt(p.score)}</b><small>POINTS</small>${mv(p.rankChange)}</div></a>`;
-const tc = t => `<a class="card tm ${t.rank === 1 ? 'top' : ''}" href="#/team/${enc(t.team)}"><b class="rk">#${rkN(t.rank)}</b>${logo(t.team, t.teamLogo)}<div class="nm"><strong>${esc(t.team)}</strong>${t.rank === 1 ? '<span class="bd g">CURRENT LEADER</span>' : ''} ${t.lastSeasonWinner ? '<span class="bd d">DEFENDING CHAMPIONS</span>' : ''}</div><div class="sc"><b>${fmt(t.totalScore)}</b><small>POINTS</small>${mv(t.rankChange)}</div></a>`;
-const podium = a => a.length ? `<div class="pod">${a.slice(0, 3).map((p, i) => `<a class="card p ${'gsb'[i]}" href="#/player/${enc(p.name)}"><b class="rk">${i === 0 ? '👑 ' : ''}#${i + 1}</b>${logo(p.team, p.teamLogo)}<strong>${esc(p.name)}</strong><small>${esc(p.team)}</small><div class="sc"><b>${fmt(p.score)}</b><small>POINTS</small></div>${mv(p.rankChange)}${badge(p)}</a>`).join('')}</div>` : '';
-const empty = '<div class="msg"><h2>NO PLAYERS FOUND</h2><p>THE ARENA IS QUIET.</p></div>';
-
-/* ---------- views ---------- */
-function home(d) {
-  const tot = d.teams.reduce((s, t) => s + t.totalScore, 0), movers = d.inds.filter(p => p.rankChange > 0).sort((a, b) => b.rankChange - a.rankChange).slice(0, 5);
-  const hi = [...d.inds].sort((a, b) => b.score - a.score)[0], wins = d.inds.filter(p => p.ultimateWinner || p.secondPlace || p.thirdPlace), def = d.teams.filter(t => t.lastSeasonWinner);
-  return `<section class="hero"><svg width="64" height="70"><use href="#emb"/></svg><h1>THREE LIONS • TPL SEASON 5</h1><p>Every Point Counts. Every Rank Matters.</p><div id="status">${statusHTML()}</div></section>
-  <div class="stats"><div class="stat"><b>${d.teams.length}</b><small>TEAMS</small></div><div class="stat"><b>${d.inds.length}</b><small>PLAYERS</small></div><div class="stat"><b>${fmt(tot)}</b><small>TOTAL POINTS</small></div><div class="stat"><b style="font-size:16px">${esc(d.inds[0]?.name || '—')}</b><small>CURRENT LEADER</small></div></div>
-  <h2>THE INDIVIDUAL LEAGUE <a href="#/players">VIEW ALL ›</a></h2>${podium(d.inds)}${d.inds.slice(3, 8).map(pc).join('')}
-  <h2>THE TEAM LEAGUE <a href="#/teams">VIEW ALL ›</a></h2>${d.teams.slice(0, 5).map(tc).join('') || empty}
-  <h2>THE RACE IS ON</h2><div class="stats"><div class="stat"><small>#1 INDIVIDUAL</small><b style="font-size:15px">${esc(d.inds[0]?.name || '—')}</b></div><div class="stat"><small>#1 TEAM</small><b style="font-size:15px">${esc(d.teams[0]?.team || '—')}</b></div><div class="stat"><small>HIGHEST SCORE</small><b style="font-size:15px">${hi ? esc(hi.name) + ' • ' + fmt(hi.score) : '—'}</b></div><div class="stat"><small>BIGGEST JUMP</small><b style="font-size:15px">${movers[0] ? esc(movers[0].name) + ' ▲' + movers[0].rankChange : '—'}</b></div></div>
-  ${movers.length ? `<h2>POWER MOVERS</h2><div class="scroll">${movers.map(pc).join('')}</div>` : ''}
-  ${wins.length || def.length ? `<h2>CHAMPIONS WALL</h2>${wins.sort((a, b) => a.rank - b.rank).map(pc).join('')}${def.map(tc).join('')}` : ''}`;
-}
-let q = {};
-function players(d) {
-  const teams = [...new Set(d.inds.map(p => p.team).filter(Boolean))].sort();
-  const a = d.inds.filter(p => (!q.team || p.team === q.team) && (!q.q || normalizeName(p.name + ' ' + p.team).includes(normalizeName(q.q))));
-  if (q.sort === 'score') a.sort((x, y) => y.score - x.score); else if (q.sort === 'name') a.sort((x, y) => x.name.localeCompare(y.name));
-  const tm = q.q ? d.teams.filter(t => normalizeName(t.team).includes(normalizeName(q.q))) : [];
-  const plain = !q.q && !q.team && !q.sort;
-  return `<h2>INDIVIDUAL LEAGUE</h2><div class="tools"><input id="q" type="search" placeholder="🔍 Search player or team" aria-label="Search player or team" value="${esc(q.q || '')}"><select id="ft" aria-label="Team filter"><option value="">All teams</option>${teams.map(t => `<option ${t === q.team ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select><select id="so" aria-label="Sort"><option value="">Sort: Rank</option><option value="score" ${q.sort === 'score' ? 'selected' : ''}>Sort: Score</option><option value="name" ${q.sort === 'name' ? 'selected' : ''}>Sort: Name</option></select></div>
-  ${tm.map(tc).join('')}${plain ? podium(a) + a.slice(3).map(pc).join('') : a.map(pc).join('') || empty}`;
-}
-const teamsView = d => `<h2>TEAM LEAGUE</h2>${d.teams.map(tc).join('') || empty}`;
-function teamDetail(d, name) {
-  const t = d.teamsByName[normalizeName(name)]; if (!t) return empty;
-  const m = d.inds.filter(p => normalizeName(p.team) === normalizeName(t.team));
-  return `<a href="#/teams" class="dates">‹ TEAMS</a><h2>THE LION'S DEN</h2>${tc(t)}<h2>TEAM MEMBERS</h2><div class="two">${m.map(p => `<div>${pc(p)}<div class="grid" style="margin:-2px 0 10px">${[['SV', p.totalSV], ['VC', p.totalVC], ['F2F', p.totalF2F], ['TOKEN', p.totalToken], ['BOOKING', p.totalBooking]].map(x => `<div><b>${x[1]}</b><small>${x[0]}</small></div>`).join('')}</div></div>`).join('') || empty}</div>`;
-}
-function chart(h) {
-  const a = [...h].reverse().slice(-30); if (a.length < 2) return '';
-  const mx = Math.max(...a.map(x => x.dailyTotal), 1), w = 300 / a.length;
-  return `<h2>DAILY TOTAL</h2><div class="chart"><svg viewBox="0 0 300 100" preserveAspectRatio="none" role="img" aria-label="Daily total chart">${a.map((x, i) => { const hh = Math.max(0, x.dailyTotal) / mx * 96; return `<rect x="${i * w + 1}" y="${100 - hh}" width="${w - 2}" height="${hh}" fill="#d4af37" rx="1"><title>${esc(x.date)}: ${x.dailyTotal}</title></rect>`; }).join('')}</svg></div>`;
-}
-function playerDetail(d, name) {
-  const p = d.individualsByName[normalizeName(name)]; if (!p) return empty;
-  const h = d.scoresByExecutive[normalizeName(p.name)] || [], sg = n => (n > 0 ? '+' : '') + n;
-  return `<a href="#/team/${enc(p.team)}" class="dates">‹ ${esc(p.team)}</a><h2>PLAYER DETAILS</h2>${pc(p)}
-  <div class="grid">${[['SITE VISITS', p.totalSV], ['VCs', p.totalVC], ['F2Fs', p.totalF2F], ['TOKENS', p.totalToken], ['BOOKINGS', p.totalBooking]].map(x => `<div><b>${x[1]}</b><small>${x[0]}</small></div>`).join('')}</div>
-  ${chart(h)}<h2>PERFORMANCE HISTORY</h2>${h.map(r => `<details><summary><span>${esc(String(r.date).slice(0, 10).split('-').reverse().join('/'))}</span><span>${fmt(r.dailyTotal)} pts</span></summary><div class="in"><div><b>${r.siteVisits}</b>SV</div><div><b>${r.vcs}</b>VC</div><div><b>${r.f2fs}</b>F2F</div><div><b>${r.token}</b>TOKEN</div><div><b>${r.booking}</b>BOOKING</div><div><b>${sg(r.dsr)}</b>DSR</div><div><b>${sg(r.additionalPoints)}</b>BONUS</div><div><b>${sg(r.negativePoints)}</b>PENALTY</div></div></details>`).join('') || empty}`;
-}
-const about = () => `<h2>ABOUT TPL SEASON 5</h2><div class="card" style="display:block"><p>The arena opens on the 10th, 20th and 30th of each month at 12:00 AM IST and stays open for 48 hours. Ranks and scores are calculated in the league sheets; this app only displays them.</p></div>`;
-
-/* ---------- router ---------- */
-function render() {
-  const v = $('#view'), h = location.hash.replace(/^#\/?/, '') || 'home', [r, ...rest] = h.split('/'), arg = decodeURIComponent(rest.join('/'));
-  const tab = r === 'team' ? 'teams' : r === 'player' ? 'players' : r;
-  document.querySelectorAll('[data-r]').forEach(a => a.classList.toggle('on', a.dataset.r === tab));
-  document.querySelectorAll('.dnav a').forEach(a => a.classList.toggle('on', a.getAttribute('href') === '#/' + tab));
-  if (!S.d) { v.innerHTML = `<div class="msg"><svg width="70" height="78"><use href="#emb"/></svg><h2>THE ARENA CONNECTION IS UNAVAILABLE</h2><p>Unable to load the latest league data.</p><p class="dates">${esc(S.err || '')}</p><button class="btn" id="retry">RETRY</button></div>`; $('#retry').onclick = () => load(); return; }
-  const d = S.d, views = { home: () => home(d), players: () => players(d), teams: () => teamsView(d), team: () => teamDetail(d, arg), player: () => playerDetail(d, arg), about };
-  v.innerHTML = `<div class="view">${S.err ? `<div class="banner">${S.stale ? 'Connection lost — showing last saved data.' : 'Update failed.'} <button class="btn" style="min-height:36px;margin:0 0 0 8px" id="retry">RETRY</button></div>` : ''}${(views[r] || views.home)()}</div>`;
-  const rt = $('#retry'); if (rt) rt.onclick = () => load(true);
-  if (r === 'players') {
-    const up = () => { q = { q: $('#q').value, team: $('#ft').value, sort: $('#so').value }; const pos = $('#q').selectionStart, f = document.activeElement.id; render(); const el = $('#' + f); if (el) { el.focus(); if (f === 'q') el.setSelectionRange(pos, pos); } };
-    $('#q').oninput = up; $('#ft').onchange = up; $('#so').onchange = up;
+/* ---------- Open / closed gate ---------- */
+let wasOpen = null;
+function tick() {
+  const now = Date.now(), s = PREVIEW ? { open: true, end: now + 36e5 * 48 } : status(now), pill = $("#pill"), c = $("#closed");
+  if (s.open) {
+    const p = parts(s.end - now), soon = s.end - now < 36e5 * 3;
+    pill.className = "pill " + (soon ? "warn" : "open");
+    pill.textContent = (soon ? "Closing " : "Open · closes ") + (p.d ? `${p.d}d ` : "") + `${p2(p.h)}:${p2(p.m)}:${p2(p.s)}`;
+    if (wasOpen !== true) { c.hidden = true; if (wasOpen === false || wasOpen === null) show(current); }
+  } else {
+    const p = parts(s.next - now); pill.className = "pill"; pill.textContent = "Resting";
+    c.hidden = false;
+    c.innerHTML = `<svg class="cup" viewBox="0 0 100 100"><path d="M30 12h40v22c0 16-9 26-20 28-11-2-20-12-20-28z"/><path d="M30 18H14c0 14 6 22 18 24M70 18h16c0 14-6 22-18 24" fill="none" stroke="currentColor" stroke-width="5"/><rect x="44" y="62" width="12" height="14"/><rect x="32" y="76" width="36" height="10" rx="2"/></svg><h1>THORE PREMIER LEAGUE</h1><h2>SEASON 5</h2><p>The league is resting. The arena reopens on ${fmtDate(s.next)} IST.</p><div class="cd">${[["d", "days"], ["h", "hrs"], ["m", "min"], ["s", "sec"]].map(([k, l]) => `<div><b>${p2(p[k])}</b><small>${l}</small></div>`).join("")}</div>`;
   }
-  const dt = S.updated ? new Date(S.updated).toLocaleString('en-GB', { timeZone: C.TIMEZONE, day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true }).toUpperCase() : '—';
-  $('#upd').textContent = (S.stale ? 'LAST UPDATED: ' : 'DATA UPDATED: ') + dt;
-  const dbg = $('#dbg'); if (C.DEBUG_MODE) { dbg.hidden = false; const a = getAppStatus(); dbg.textContent = `API: ${C.API_URL}\nFetched: ${S.fetchedAt}\nTeams: ${d.teams.length} Individuals: ${d.inds.length} Score rows: ${Object.values(d.scoresByExecutive).reduce((s, x) => s + x.length, 0)}\nStatus: ${a.status}\nServer offset ms: ${Math.round(S.offset)}`; }
+  wasOpen = s.open;
 }
-let lastRoute = '';
-window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
-$('#refresh').onclick = () => load(true);
-const sp = $('#splash'); if (sessionStorage.getItem('tpl5s')) sp.remove(); else { sessionStorage.setItem('tpl5s', 1); setTimeout(() => { sp.classList.add('out'); setTimeout(() => sp.remove(), 600); }, 1500); }
-setInterval(tick, 1000); setInterval(() => load(true), C.REFRESH_MS);
-load();
-})();
+tick(); setInterval(tick, 1000);
