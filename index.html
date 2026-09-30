@@ -1,24 +1,40 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>TPL Season 5 | Three Lions</title>
-<meta name="description" content="TPL Season 5 — Three Lions leaderboard. Every Point Counts. Every Rank Matters.">
-<meta property="og:title" content="TPL Season 5 | Three Lions"><meta property="og:description" content="Live individual & team leaderboards."><meta property="og:image" content="assets/og.png">
-<meta name="theme-color" content="#080B12">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M32 3 8 12v20c0 14 10 24 24 29 14-5 24-15 24-29V12z' fill='%230b1a3a' stroke='%23d4af37' stroke-width='4'/%3E%3Ctext x='32' y='40' font-size='22' font-family='Arial' font-weight='900' fill='%23d4af37' text-anchor='middle'%3ET5%3C/text%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Oswald:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css"></head><body>
-<svg width="0" height="0" style="position:absolute"><defs>
-<symbol id="emb" viewBox="0 0 64 70"><path d="M32 2 6 12v22c0 15 11 26 26 32 15-6 26-17 26-32V12z" fill="#0b1a3a" stroke="#d4af37" stroke-width="3"/>
-<path d="M22 10l5 5 5-7 5 7 5-5-2 8H24z" fill="#d4af37"/>
-<g fill="#d4af37"><g id="lh"><circle cx="0" cy="0" r="5"/><path d="M-8 -3l4 -6 4 4 4-4 4 6-2 8h-12z" opacity=".55" transform="translate(0 2)"/></g></g>
-<use href="#lh" transform="translate(32 30)"/><use href="#lh" transform="translate(20 44) scale(.8)"/><use href="#lh" transform="translate(44 44) scale(.8)"/>
-<text x="32" y="60" font-size="9" font-family="Oswald,Arial" font-weight="700" fill="#fff" text-anchor="middle">TPL 5</text></symbol></defs></svg>
-<div id="splash"><svg class="big"><use href="#emb"/></svg><h1>T P L</h1><p>SEASON 5</p></div>
-<header id="top"><a href="#/home" class="brand" aria-label="TPL Home"><svg><use href="#emb"/></svg><span>TPL SEASON 5</span></a>
-<nav class="dnav"><a href="#/home">HOME</a><a href="#/players">INDIVIDUAL</a><a href="#/teams">TEAMS</a><a href="#/about">ABOUT</a></nav>
-<button id="refresh" aria-label="Refresh data">⟳</button></header>
-<main id="view" tabindex="-1"></main>
-<footer><b>TPL SEASON 5 • THREE LIONS</b><p>Every Point Counts. Every Rank Matters.</p><small id="upd"></small><div id="dbg" hidden></div></footer>
-<nav class="bnav"><a href="#/home" data-r="home">HOME</a><a href="#/players" data-r="players">PLAYERS</a><a href="#/teams" data-r="teams">TEAMS</a><a href="#/about" data-r="about">ABOUT</a></nav>
-<script src="js/config.js"></script><script src="js/app.js"></script></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>TPL Season 5 · THORE Premier League</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Figtree:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="splash">
+  <svg class="cup" viewBox="0 0 100 100" aria-hidden="true"><path d="M30 12h40v22c0 16-9 26-20 28-11-2-20-12-20-28z"/><path d="M30 18H14c0 14 6 22 18 24M70 18h16c0 14-6 22-18 24" fill="none" stroke="currentColor" stroke-width="5"/><rect x="44" y="62" width="12" height="14"/><rect x="32" y="76" width="36" height="10" rx="2"/></svg>
+  <h1>THORE PREMIER LEAGUE</h1><h2>SEASON 5</h2><p>Rise. Compete. Conquer.</p><span class="sweep"></span>
+</div>
+
+<header id="top">
+  <div class="brand">TPL<b>S5</b></div>
+  <div id="pill" class="pill"></div>
+  <button id="refresh" aria-label="Refresh"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5"/></svg></button>
+</header>
+
+<main id="app">
+  <section id="individual" class="view"></section>
+  <section id="team" class="view" hidden></section>
+</main>
+
+<nav id="nav">
+  <i id="ind"></i>
+  <button data-v="individual" class="on">Individual</button>
+  <button data-v="team">Team</button>
+</nav>
+
+<div id="detail" aria-hidden="true"></div>
+<div id="closed" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>
