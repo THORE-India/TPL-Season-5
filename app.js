@@ -14,7 +14,6 @@ const OPEN_HOUR = 10;      // opens at 10:00 AM IST
 const OPEN_FOR = 2 * DAY;  // stays live for 48 hours
 
 /* ---------- Opening schedule (Asia/Kolkata, UTC+5:30, no DST) ---------- */
-const IST = 5.5 * 36e5, DAY = 864e5;
 function windows(now) {
   const d = new Date(now + IST), out = [];
   for (let k = -1; k <= 1; k++) {
