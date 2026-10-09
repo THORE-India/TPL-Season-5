@@ -9,6 +9,9 @@ const key = s => String(s ?? "").trim().toLowerCase();
 const RM = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const DEMO = !API_URL.startsWith("http");
 const PREVIEW = new URLSearchParams(location.search).has("preview"); // ?preview=1 skips the schedule
+const IST = 5.5 * 36e5, DAY = 864e5;
+const OPEN_HOUR = 10;      // opens at 10:00 AM IST
+const OPEN_FOR = 2 * DAY;  // stays live for 48 hours
 
 /* ---------- Opening schedule (Asia/Kolkata, UTC+5:30, no DST) ---------- */
 const IST = 5.5 * 36e5, DAY = 864e5;
@@ -18,7 +21,7 @@ function windows(now) {
     const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + k, 1));
     const y = t.getUTCFullYear(), m = t.getUTCMonth();
     const dim = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
-    [10, 20, 30].forEach(day => { const s = Date.UTC(y, m, Math.min(day, dim)) - IST; out.push([s, s + 2 * DAY]); }); // 30th -> last day in short months
+    [10, 20, 30].forEach(day => { const s = Date.UTC(y, m, Math.min(day, dim), OPEN_HOUR) - IST; out.push([s, s + OPEN_FOR]); }); // 30th -> last day in short months
   }
   return out.sort((a, b) => a[0] - b[0]);
 }
