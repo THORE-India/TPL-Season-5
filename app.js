@@ -9,11 +9,12 @@ const key = s => String(s ?? "").trim().toLowerCase();
 const RM = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const DEMO = !API_URL.startsWith("http");
 const PREVIEW = new URLSearchParams(location.search).has("preview"); // ?preview=1 skips the schedule
+const CROWN = `<svg class="ci" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18h18l1.5-10-5 4L12 4 7.5 12l-5-4zM4 20h16v2H4z"/></svg>`;
+
+/* ---------- Opening schedule (Asia/Kolkata, UTC+5:30, no DST) ---------- */
 const IST = 5.5 * 36e5, DAY = 864e5;
 const OPEN_HOUR = 10;      // opens at 10:00 AM IST
 const OPEN_FOR = 2 * DAY;  // stays live for 48 hours
-
-/* ---------- Opening schedule (Asia/Kolkata, UTC+5:30, no DST) ---------- */
 function windows(now) {
   const d = new Date(now + IST), out = [];
   for (let k = -1; k <= 1; k++) {
@@ -74,15 +75,15 @@ const sorted = a => [...a].sort((x, y) => (num(x.Rank) || 999) - (num(y.Rank) ||
 /* ---------- Views ---------- */
 function renderIndividual(list) {
   if (!list.length) return emptyHTML;
-  const L = sorted(list), top = L.slice(0, 3), medal = ["🥇", "🥈", "🥉"];
-  const pod = [1, 0, 2].filter(i => top[i]).map(i => { const p = top[i]; return `<div class="pod p${i + 1}"><div class="m">${medal[i]}</div>${pic(p["Team Logo"], p.Name, "av")}<div class="nm">${esc(p.Name)}</div><div class="tm">${esc(p.Team)}</div><div class="sc" data-n="${num(p.Score)}">0</div></div>`; }).join("");
+  const L = sorted(list), top = L.slice(0, 3);
+  const pod = [1, 0, 2].filter(i => top[i]).map(i => { const p = top[i]; return `<div class="pod p${i + 1}"><div class="m">${i === 0 ? CROWN : `<span class="mdl">${i + 1}</span>`}</div>${pic(p["Team Logo"], p.Name, "av")}<div class="nm">${esc(p.Name)}</div><div class="tm">${esc(p.Team)}</div><div class="sc" data-n="${num(p.Score)}">0</div></div>`; }).join("");
   const rows = L.slice(3).map((p, i) => `<div class="row" style="--i:${i}"><div class="rk">${esc(p.Rank)}</div><div class="info"><b>${esc(p.Name)}</b><small>${esc(p.Team)} · SV ${num(p["Total SV"])} · VC ${num(p["Total VC"])} · F2F ${num(p["Total F2F"])} · Tok ${num(p["Total Token"])} · Bk ${num(p["Total Booking"])}</small></div><div class="pts" data-n="${num(p.Score)}">0</div></div>`).join("");
   return `<h3 class="t">Individual Leaderboard</h3><div class="podium">${pod}</div>${rows}`;
 }
 function renderTeam(list) {
   if (!list.length) return emptyHTML;
   const L = sorted(list), lead = L[0];
-  const hero = `<button class="hero" data-t="${esc(lead.Team)}">${pic(lead["Team Logo"], lead.Team, "lg")}<div class="info"><div class="lead">🏆 LEADING THE LEAGUE</div><h4>${esc(lead.Team)}</h4></div><div class="pts"><span data-n="${num(lead["Total Score"])}">0</span><small>points</small></div></button>`;
+  const hero = `<button class="hero" data-t="${esc(lead.Team)}">${pic(lead["Team Logo"], lead.Team, "lg")}<div class="info"><div class="lead">${CROWN}Leading the league</div><h4>${esc(lead.Team)}</h4></div><div class="pts"><span data-n="${num(lead["Total Score"])}">0</span><small>points</small></div></button>`;
   const rows = L.slice(1).map((t, i) => `<button class="row" style="--i:${i}" data-t="${esc(t.Team)}"><div class="rk">${esc(t.Rank)}</div>${pic(t["Team Logo"], t.Team, "lg")}<div class="info"><b>${esc(t.Team)}${t.lastSeasonWinner === true || key(t.lastSeasonWinner) === "true" || key(t.lastSeasonWinner) === "yes" ? '<span class="crown">S4 CHAMPS</span>' : ""}</b>${move(t)}</div><div class="pts"><span data-n="${num(t["Total Score"])}">0</span><small>points</small></div></button>`).join("");
   return `<h3 class="t">Team Leaderboard</h3>${hero}${rows}`;
 }
@@ -137,7 +138,9 @@ function tick() {
   } else {
     const p = parts(s.next - now); pill.className = "pill"; pill.textContent = "Resting";
     c.hidden = false;
-    c.innerHTML = `<svg class="cup" viewBox="0 0 100 100"><path d="M30 12h40v22c0 16-9 26-20 28-11-2-20-12-20-28z"/><path d="M30 18H14c0 14 6 22 18 24M70 18h16c0 14-6 22-18 24" fill="none" stroke="currentColor" stroke-width="5"/><rect x="44" y="62" width="12" height="14"/><rect x="32" y="76" width="36" height="10" rx="2"/></svg><h1>THORE PREMIER LEAGUE</h1><h2>SEASON 5</h2><p>The league is resting. The arena reopens on ${fmtDate(s.next)} IST.</p><div class="cd">${[["d", "days"], ["h", "hrs"], ["m", "min"], ["s", "sec"]].map(([k, l]) => `<div><b>${p2(p[k])}</b><small>${l}</small></div>`).join("")}</div>`;
+    if (!c.firstChild) c.innerHTML = `<img class="logo" src="assets/logo.webp" alt="TPL Season 5 – Stronger. Bolder."><h1>The league is resting</h1><p></p><div class="cd"></div>`; // built once so the logo animation doesn't restart
+    c.querySelector("p").textContent = `The arena reopens on ${fmtDate(s.next)} IST.`;
+    c.querySelector(".cd").innerHTML = [["d", "days"], ["h", "hrs"], ["m", "min"], ["s", "sec"]].map(([k, l]) => `<div><b>${p2(p[k])}</b><small>${l}</small></div>`).join("");
   }
   wasOpen = s.open;
 }
